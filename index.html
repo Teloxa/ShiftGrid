@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift planner</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<script>
+  /* Set the theme before first paint to avoid a light/dark flash. */
+  try{document.documentElement.dataset.theme=localStorage.getItem('shift-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')}catch(e){document.documentElement.dataset.theme='light'}
+</script>
+<style>
+/* ===== 1. Design tokens (change the look here) ===== */
+:root{
+  --bg:#eceff4; --surface:#fff; --surface-2:#f4f6fa; --ink:#19202e; --muted:#64708a; --line:#d8dee9;
+  --accent:#2446d9; --accent-ink:#fff; --danger:#c8372d;
+  --radius:14px; --radius-sm:9px;
+  --shadow:0 1px 2px rgba(25,32,46,.06),0 6px 18px rgba(25,32,46,.08);
+  --lift:0 18px 40px rgba(25,32,46,.3);
+  --font:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --bg:#0f131b; --surface:#171c27; --surface-2:#1d2330; --ink:#e8ecf4; --muted:#8e9ab3; --line:#2a3242;
+  --accent:#6d8bff; --accent-ink:#0f131b; --danger:#ff7a6e;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35); --lift:0 18px 40px rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+
+/* ===== 2. Base ===== */
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 var(--font);transition:background .25s,color .25s}
+body.dragging-now{user-select:none;cursor:grabbing}
+h1,h2{margin:0;letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:800}
+h2{font-size:1.05rem;font-weight:600}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ===== 3. Layout ===== */
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;max-width:1500px;margin:0 auto;padding:20px 20px 0}
+.top small{color:var(--muted);margin-left:10px;font-size:.8rem}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.layout{display:grid;grid-template-columns:290px 1fr;gap:20px;max-width:1500px;margin:0 auto;padding:20px;align-items:start}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+.side{display:grid;gap:16px}
+.panel{background:var(--surface);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.hint{color:var(--muted);font-size:.82rem;margin:6px 0 12px}
+
+/* ===== 4. Buttons & inputs ===== */
+.btn,button{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:7px 12px;cursor:pointer;transition:transform .12s,box-shadow .12s,background .12s}
+.btn:hover,button:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+.btn:active,button:active{transform:translateY(0) scale(.97)}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.danger{color:var(--danger)}
+input[type=text],input[type=time]{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;transition:border-color .15s,box-shadow .15s}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+input[type=color]{width:100%;height:38px;padding:2px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2)}
+
+/* ===== 5. Palette chips (draggable shift templates) ===== */
+#palette{display:grid;gap:8px}
+@media (max-width:900px){#palette{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}}
+.chip,.block{--c:#888;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px 8px 12px;border-radius:10px;
+  background:color-mix(in srgb,var(--c) 16%,var(--surface));border:1px solid color-mix(in srgb,var(--c) 40%,var(--line));border-left:5px solid var(--c);
+  cursor:grab;user-select:none;touch-action:none;transition:transform .15s,box-shadow .15s,opacity .15s}
+.chip:hover,.block:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.chip strong,.block strong{display:block;font-size:.92rem}
+.chip span,.block span{display:block;font-size:.76rem;color:var(--muted)}
+.chip button{padding:3px 8px;font-size:.78rem}
+.dragging{opacity:.3}
+
+/* ===== 6. Schedule grid ===== */
+.scroll{overflow-x:auto;border-radius:var(--radius);box-shadow:var(--shadow)}
+.grid{display:grid;grid-template-columns:132px repeat(7,minmax(120px,1fr));gap:1px;background:var(--line);min-width:930px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.corner,.dayhead,.rowhead{background:var(--surface-2)}
+.dayhead{padding:10px;font-weight:600;text-align:center}
+.dayhead.today{color:var(--accent);box-shadow:inset 0 -3px 0 var(--accent)}
+.rowhead{--c:#888;position:sticky;left:0;z-index:2;padding:10px 12px;border-left:5px solid var(--c)}
+.rowhead span{display:block;color:var(--muted);font-size:.78rem}
+.cell{--c:#888;min-height:86px;padding:6px;display:flex;flex-direction:column;gap:6px;background:var(--surface);cursor:pointer;transition:background .15s,box-shadow .15s,opacity .15s}
+.cell:empty::after{content:'+';margin:auto;font-size:1.4rem;color:var(--muted);opacity:0;transition:opacity .15s}
+.cell:hover:empty::after,.cell:focus-visible:empty::after{opacity:1}
+.drag-on .cell:not(.valid){opacity:.4}                       /* dim cells that can't take this shift */
+.cell.valid{background:color-mix(in srgb,var(--c) 8%,var(--surface))}
+.cell.over{background:color-mix(in srgb,var(--c) 22%,var(--surface));box-shadow:inset 0 0 0 2px var(--c)}
+.block .emp{cursor:grab}
+.empty-note{grid-column:1/-1;padding:40px;text-align:center;background:var(--surface);color:var(--muted)}
+
+/* ===== 7. Drag ghost + animations ===== */
+.ghost{position:fixed;z-index:100;pointer-events:none;margin:0;box-shadow:var(--lift);transform:scale(1.06) rotate(2.5deg);animation:lift .18s ease-out}
+.ghost button{display:none}
+@keyframes lift{from{transform:scale(1) rotate(0);box-shadow:var(--shadow)}to{transform:scale(1.06) rotate(2.5deg);box-shadow:var(--lift)}}
+.snap{animation:snap .5s cubic-bezier(.2,.9,.3,1.3)}          /* played when a block lands */
+@keyframes snap{0%{transform:scale(.7);opacity:.3}55%{transform:scale(1.08);opacity:1}78%{transform:scale(.96)}100%{transform:scale(1)}}
+
+/* ===== 8. Team list ===== */
+#empForm{display:flex;gap:8px;margin:10px 0}
+#empList{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+#empList li{display:flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--line);border-radius:99px;padding:3px 4px 3px 12px;font-size:.88rem}
+#empList b{color:var(--muted);font-weight:400;font-size:.78rem}
+#empList button{border:0;background:none;padding:2px 8px;border-radius:99px;color:var(--muted)}
+
+/* ===== 9. Dialogs ===== */
+dialog{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);padding:22px;width:min(390px,92vw);box-shadow:var(--lift)}
+dialog::backdrop{background:rgba(10,14,22,.5);backdrop-filter:blur(2px)}
+dialog[open]{animation:pop .22s ease-out}
+@keyframes pop{from{transform:translateY(10px) scale(.97);opacity:0}}
+dialog form{display:grid;gap:12px}
+dialog label{display:grid;gap:4px;font-size:.85rem;color:var(--muted)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.foot{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+.foot .danger{margin-right:auto}
+[hidden]{display:none!important}
+
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Shift planner<small id="saved"></small></h1>
+  <div class="actions">
+    <button id="btnExport">Export JSON</button>
+    <label class="btn">Import JSON<input type="file" id="fileImport" accept="application/json" hidden></label>
+    <button id="btnClear" class="danger">Clear week</button>
+    <button id="btnTheme" aria-label="Toggle light or dark theme">Theme</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="side">
+    <section class="panel">
+      <div class="panel-head"><h2>Shifts</h2><button id="btnAddShift" class="primary">New shift</button></div>
+      <p class="hint">Drag a shift onto its row in the grid, or click any cell.</p>
+      <div id="palette"></div>
+    </section>
+    <section class="panel">
+      <h2>Team</h2>
+      <form id="empForm"><input type="text" id="empInput" placeholder="Add employee" maxlength="40" aria-label="Employee name"><button>Add</button></form>
+      <ul id="empList"></ul>
+    </section>
+  </aside>
+  <section aria-label="Weekly schedule"><div class="scroll"><div id="grid" class="grid"></div></div></section>
+</main>
+
+<!-- Shift editor -->
+<dialog id="dlgShift"><form id="frmShift">
+  <h2 id="shTitle">New shift</h2>
+  <label>Name<input type="text" id="shName" required maxlength="30" placeholder="e.g. Morning"></label>
+  <div class="row2"><label>Start<input type="time" id="shStart" required></label><label>End<input type="time" id="shEnd" required></label></div>
+  <label>Color<input type="color" id="shColor"></label>
+  <div class="foot"><button type="button" id="shDel" class="danger">Delete</button><button type="button" data-close>Cancel</button><button class="primary">Save shift</button></div>
+</form></dialog>
+
+<!-- Assignment editor -->
+<dialog id="dlgAssign"><form id="frmAssign">
+  <h2 id="asgTitle"></h2>
+  <label>Employee<input type="text" id="asgEmp" list="empData" required maxlength="40" placeholder="Pick or type a name" autocomplete="off"></label>
+  <datalist id="empData"></datalist>
+  <div class="foot"><button type="button" id="asgDel" class="danger">Remove</button><button type="button" data-close>Cancel</button><button class="primary">Assign</button></div>
+</form></dialog>
+
+<script>
+(() => {
+'use strict';
+
+/* ===== State =====
+   One plain object is the single source of truth; render() rebuilds the DOM from it. */
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const LONG = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const KEY = 'shift-planner-v1';
+const COLORS = ['#e8a317','#2f6df6','#7a5af8','#1fa971','#e5484d','#d6409f'];
+const $ = (s, r = document) => r.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 9);
+const cid = v => String(v).replace(/[^\w-]/g, '');   // ids end up in selectors, so keep them safe
+
+/* Tiny DOM helper. Text goes through textContent/append, never innerHTML (no XSS from names). */
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'dataset') Object.assign(el.dataset, v);
+    else el.setAttribute(k, v);
+  }
+  el.append(...kids.flat().filter(x => x != null));
+  return el;
+}
+
+const seed = () => {
+  const m = {id:uid(), name:'Morning',   start:'06:00', end:'14:00', color:COLORS[0]};
+  const a = {id:uid(), name:'Afternoon', start:'14:00', end:'22:00', color:COLORS[1]};
+  const n = {id:uid(), name:'Night',     start:'22:00', end:'06:00', color:COLORS[2]};
+  return {shifts:[m,a,n], employees:['Ana','Luis','Marta'], assignments:[
+    {id:uid(), shiftId:m.id, day:0, emp:'Ana'}, {id:uid(), shiftId:a.id, day:0, emp:'Luis'}, {id:uid(), shiftId:n.id, day:1, emp:'Marta'}]};
+};
+
+/* Validate anything coming from storage or an imported file before trusting it. */
+function normalize(d) {
+  if (!d || !Array.isArray(d.shifts) || !Array.isArray(d.assignments)) throw new Error('Invalid schedule file');
+  const hex = c => /^#[0-9a-f]{6}$/i.test(c) ? c : COLORS[1];
+  const time = t => /^\d{2}:\d{2}$/.test(t) ? t : '09:00';
+  const shifts = d.shifts.map(s => ({id:cid(s.id), name:String(s.name).slice(0,30), start:time(s.start), end:time(s.end), color:hex(s.color)}));
+  const ids = new Set(shifts.map(s => s.id));
+  return {
+    shifts,
+    employees: [...new Set((d.employees || []).map(e => String(e).slice(0,40)))],
+    assignments: d.assignments.filter(a => ids.has(cid(a.shiftId)) && a.day >= 0 && a.day < 7)
+      .map(a => ({id:cid(a.id || uid()), shiftId:cid(a.shiftId), day:a.day | 0, emp:String(a.emp).slice(0,40)}))
+  };
+}
+let state;
+try { state = normalize(JSON.parse(localStorage.getItem(KEY))); } catch { state = seed(); }
+
+let popId = null;                                  // id of the block that should play the "snap" animation
+const shiftById = id => state.shifts.find(s => s.id === id);
+function commit() {                                // every mutation ends here: persist + redraw
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  $('#saved').textContent = 'Autosaved ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  render();
+}
+
+/* ===== Rendering ===== */
+function render() { renderPalette(); renderGrid(); renderTeam(); }
+
+function renderPalette() {
+  $('#palette').replaceChildren(...state.shifts.map(s =>
+    h('div', {class:'chip', style:`--c:${s.color}`, dataset:{shift:s.id}},
+      h('div', {}, h('strong', {}, s.name), h('span', {}, `${s.start}–${s.end}`)),
+      h('button', {type:'button', 'aria-label':`Edit ${s.name}`, dataset:{editShift:s.id}}, 'Edit'))));
+}
+
+function renderGrid() {
+  const g = $('#grid'), today = (new Date().getDay() + 6) % 7;
+  g.replaceChildren(h('div', {class:'corner'}),
+    ...DAYS.map((d, i) => h('div', {class:'dayhead' + (i === today ? ' today' : '')}, d)));
+  if (!state.shifts.length) g.append(h('div', {class:'empty-note'}, 'No shifts yet. Create one with “New shift”.'));
+  for (const s of state.shifts) {
+    g.append(h('div', {class:'rowhead', style:`--c:${s.color}`}, h('strong', {}, s.name), h('span', {}, `${s.start}–${s.end}`)));
+    DAYS.forEach((d, i) => {
+      const cell = h('div', {class:'cell', style:`--c:${s.color}`, tabindex:'0', role:'button',
+        'aria-label':`Assign ${s.name} on ${LONG[i]}`, dataset:{shift:s.id, day:i}});
+      for (const a of state.assignments.filter(a => a.shiftId === s.id && a.day === i)) {
+        const b = h('div', {class:'block' + (a.id === popId ? ' snap' : ''), style:`--c:${s.color}`, tabindex:'0', role:'button',
+          'aria-label':`${a.emp}, ${s.name}, ${LONG[i]}. Edit`, dataset:{shift:s.id, asg:a.id}},
+          h('div', {}, h('strong', {}, a.emp), h('span', {}, `${s.name} ${s.start}–${s.end}`)));
+        cell.append(b);
+      }
+      g.append(cell);
+    });
+  }
+  popId = null;
+}
+
+function renderTeam() {
+  $('#empList').replaceChildren(...state.employees.map(e =>
+    h('li', {}, e, h('b', {}, String(state.assignments.filter(a => a.emp === e).length)),
+      h('button', {type:'button', 'aria-label':`Remove ${e}`, dataset:{rmEmp:e}}, '×'))));
+  $('#empData').replaceChildren(...state.employees.map(e => h('option', {value:e})));
+}
+
+/* ===== Drag & drop (Pointer Events) =====
+   Why not native HTML5 DnD? It gives no control over the drag image, no easy "elevation"
+   and no touch support. A cloned "ghost" that follows the pointer fixes all three. */
+let drag = null, suppressClick = false;
+
+document.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.target.closest('button,input')) return;
+  const src = e.target.closest('.chip,.block');
+  if (!src) return;
+  drag = {src, id:src.dataset.asg || null, shiftId:src.dataset.shift, x0:e.clientX, y0:e.clientY, pid:e.pointerId, ghost:null, target:null};
+});
+
+window.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.pid) return;
+  if (!drag.ghost) {                                           // wait for a 6px move so plain clicks still work
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return;
+    const r = drag.src.getBoundingClientRect();
+    drag.dx = drag.x0 - r.left; drag.dy = drag.y0 - r.top;
+    drag.ghost = drag.src.cloneNode(true);
+    drag.ghost.classList.add('ghost');
+    drag.ghost.classList.remove('snap');
+    drag.ghost.style.width = r.width + 'px';
+    document.body.append(drag.ghost);
+    drag.src.classList.add('dragging');
+    document.body.classList.add('dragging-now');
+    $('#grid').classList.add('drag-on');
+    document.querySelectorAll(`.cell[data-shift="${drag.shiftId}"]`).forEach(c => c.classList.add('valid'));
+  }
+  drag.ghost.style.left = e.clientX - drag.dx + 'px';
+  drag.ghost.style.top = e.clientY - drag.dy + 'px';
+  const cell = document.elementFromPoint(e.clientX, e.clientY)?.closest('.cell.valid') || null;
+  if (cell !== drag.target) { drag.target?.classList.remove('over'); cell?.classList.add('over'); drag.target = cell; }
+});
+
+function endDrag(cancel) {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.ghost) return;
+  suppressClick = true; setTimeout(() => suppressClick = false, 0);   // the click after a drag must not open dialogs
+  document.body.classList.remove('dragging-now');
+  $('#grid').classList.remove('drag-on');
+  document.querySelectorAll('.valid,.over').forEach(c => c.classList.remove('valid', 'over'));
+  const cell = cancel ? null : d.target;
+  if (cell) {
+    d.ghost.remove(); d.src.classList.remove('dragging');
+    const day = +cell.dataset.day;
+    if (d.id) { const a = state.assignments.find(a => a.id === d.id); a.day = day; popId = a.id; commit(); }
+    else openAssign({shiftId:d.shiftId, day});               // from the palette: ask who works it
+  } else {                                                    // invalid drop: glide back to where it came from
+    const r = d.src.getBoundingClientRect(), g = d.ghost;
+    g.style.transition = 'left .24s ease, top .24s ease, transform .24s ease';
+    g.style.left = r.left + 'px'; g.style.top = r.top + 'px'; g.style.transform = 'none';
+    setTimeout(() => { g.remove(); d.src.classList.remove('dragging'); }, 250);
+  }
+}
+window.addEventListener('pointerup', () => endDrag(false));
+window.addEventListener('pointercancel', () => endDrag(true));
+window.addEventListener('click', e => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+
+/* ===== Click handling (delegated) ===== */
+document.addEventListener('click', e => {
+  const close = e.target.closest('[data-close]');
+  if (close) return close.closest('dialog').close();
+  const edit = e.target.closest('[data-edit-shift]');
+  if (edit) return openShift(edit.dataset.editShift);
+  const rm = e.target.closest('[data-rm-emp]');
+  if (rm) { state.employees = state.employees.filter(x => x !== rm.dataset.rmEmp); return commit(); }
+  const block = e.target.closest('.block');
+  if (block) return openAssign({id:block.dataset.asg});
+  const cell = e.target.closest('.cell');
+  if (cell) openAssign({shiftId:cell.dataset.shift, day:+cell.dataset.day});
+});
+document.addEventListener('keydown', e => {                    // keyboard parity: Enter/Space acts like a click
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cell,.block')) { e.preventDefault(); e.target.click(); }
+});
+
+/* ===== Assignment dialog ===== */
+let asg = null;
+function openAssign({id, shiftId, day}) {
+  const a = id && state.assignments.find(x => x.id === id);
+  asg = {id:a ? a.id : null, shiftId:a ? a.shiftId : shiftId, day:a ? a.day : day};
+  const s = shiftById(asg.shiftId);
+  $('#asgTitle').textContent = `${s.name}, ${LONG[asg.day]}`;
+  $('#asgEmp').value = a ? a.emp : '';
+  $('#asgDel').hidden = !a;
+  $('#dlgAssign').showModal();
+  $('#asgEmp').focus();
+}
+$('#frmAssign').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('#asgEmp').value.trim();
+  if (!name) return;
+  if (!state.employees.some(x => x.toLowerCase() === name.toLowerCase())) state.employees.push(name);   // new names join the team
+  if (asg.id) state.assignments.find(a => a.id === asg.id).emp = name;
+  else { asg.id = uid(); state.assignments.push({id:asg.id, shiftId:asg.shiftId, day:asg.day, emp:name}); }
+  popId = asg.id;
+  $('#dlgAssign').close(); commit();
+});
+$('#asgDel').addEventListener('click', () => {
+  state.assignments = state.assignments.filter(a => a.id !== asg.id);
+  $('#dlgAssign').close(); commit();
+});
+
+/* ===== Shift dialog (create / edit / delete) ===== */
+let editing = null;
+function openShift(id) {
+  const s = shiftById(id); editing = s ? s.id : null;
+  $('#shTitle').textContent = s ? 'Edit shift' : 'New shift';
+  $('#shName').value = s ? s.name : '';
+  $('#shStart').value = s ? s.start : '09:00';
+  $('#shEnd').value = s ? s.end : '17:00';
+  $('#shColor').value = s ? s.color : COLORS[state.shifts.length % COLORS.length];
+  $('#shDel').hidden = !s;
+  $('#dlgShift').showModal();
+}
+$('#btnAddShift').addEventListener('click', () => openShift());
+$('#frmShift').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = {name:$('#shName').value.trim(), start:$('#shStart').value, end:$('#shEnd').value, color:$('#shColor').value};
+  if (editing) Object.assign(shiftById(editing), v); else state.shifts.push({id:uid(), ...v});
+  $('#dlgShift').close(); commit();
+});
+$('#shDel').addEventListener('click', () => {
+  const n = state.assignments.filter(a => a.shiftId === editing).length;
+  if (n && !confirm(`Deleting this shift also removes ${n} assignment${n > 1 ? 's' : ''}. Continue?`)) return;
+  state.shifts = state.shifts.filter(s => s.id !== editing);
+  state.assignments = state.assignments.filter(a => a.shiftId !== editing);
+  $('#dlgShift').close(); commit();
+});
+
+/* ===== Team ===== */
+$('#empForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const n = $('#empInput').value.trim();
+  if (n && !state.employees.some(x => x.toLowerCase() === n.toLowerCase())) state.employees.push(n);
+  $('#empInput').value = ''; commit();
+});
+
+/* ===== Export / import / clear / theme ===== */
+$('#btnExport').addEventListener('click', () => {
+  const a = h('a', {href:URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], {type:'application/json'})), download:'shift-planner.json'});
+  a.click(); URL.revokeObjectURL(a.href);
+});
+$('#fileImport').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { state = normalize(JSON.parse(await f.text())); commit(); }
+  catch (err) { alert('Could not import: ' + err.message); }
+  e.target.value = '';
+});
+$('#btnClear').addEventListener('click', () => {
+  if (confirm('Remove all assignments? Shifts and team stay.')) { state.assignments = []; commit(); }
+});
+$('#btnTheme').addEventListener('click', () => {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('shift-theme', t); } catch {}
+});
+
+render();
+})();
+</script>
+</body>
+</html>
